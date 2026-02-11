@@ -151,3 +151,168 @@ def plot_confidence_analysis(thresholds, accuracy_scores, acceptance_rates):
     # Save the deliverable
     plt.savefig('../results/confidence_threshold_analysis.png')
     plt.show()
+
+def build_cost_matrix(num_classes=10, default_wrong_cost=DEFAULT_WRONG_COST):
+    # Initialize a 10x10 matrix with 0
+    cost_matrix = torch.zeros((num_classes, num_classes), dtype=torch.float32)
+
+    # Assign default cost to all incorrect predictions
+    for true_label in range(num_classes):
+        for pred_label in range(num_classes):
+            if true_label != pred_label:
+                cost_matrix[true_label, pred_label] = default_wrong_cost
+
+    # function for readability
+    def set_cost(true_label, pred_label, cost):
+        cost_matrix[true_label, pred_label] = cost
+
+    # Business-specific costly errors
+    # Bag → Sneaker (Low)
+    set_cost(true_label=8, pred_label=7, cost=COST_LOW)
+
+    # Shirt → T-shirt (High)
+    set_cost(true_label=6, pred_label=0, cost=COST_HIGH)
+
+    # Coat → Pullover (High)
+    set_cost(true_label=4, pred_label=2, cost=COST_HIGH)
+
+    # Sandal → Sneaker (Medium)
+    set_cost(true_label=5, pred_label=7, cost=COST_MED)
+
+    # Ankle boot → Sneaker (Medium)
+    set_cost(true_label=9, pred_label=7, cost=COST_MED)
+
+    return cost_matrix
+
+def get_test_predictions(model, test_loader, device):
+    model.eval()
+    y_true = []
+    y_pred = []
+
+    with torch.no_grad():
+        for X, labels in test_loader:
+            X = X.to(device)
+            labels = labels.to(device)
+
+            # Forward pass
+            outputs = model(X)
+
+            # Predicted class
+            preds = torch.argmax(outputs, dim=1)
+
+            y_true.append(labels.cpu())
+            y_pred.append(preds.cpu())
+
+    y_true = torch.cat(y_true)
+    y_pred = torch.cat(y_pred)
+    return y_true, y_pred
+
+def standard_accuracy(y_true, y_pred):
+    return (y_true == y_pred).float().mean().item()
+
+def cost_weighted_metrics(y_true, y_pred, cost_matrix):
+    y_true = y_true.long()
+    y_pred = y_pred.long()
+
+    # Lookup cost per prediction
+    per_item_cost = cost_matrix[y_true, y_pred]
+
+    total_cost = per_item_cost.sum().item()
+    avg_cost = per_item_cost.mean().item()
+
+    max_cost = cost_matrix.max().item()
+
+    # Normalize cost
+    cost_weighted_accuracy = 1.0 - (avg_cost / max_cost)
+
+    return total_cost, avg_cost, cost_weighted_accuracy
+
+#Count misclassifications by (true, predicted) pair + their cost
+def cost_breakdown(y_true, y_pred, cost_matrix, class_names, top_k=10):
+    y_true = y_true.long()
+    y_pred = y_pred.long()
+
+    pair_counts = defaultdict(int)
+    pair_total_cost = defaultdict(float)
+
+    for t, p in zip(y_true.tolist(), y_pred.tolist()):
+        if t != p:
+            c = float(cost_matrix[t, p].item())
+            pair_counts[(t, p)] += 1
+            pair_total_cost[(t, p)] += c
+
+    # Sort by total cost descending
+    ranked = sorted(pair_total_cost.items(), key=lambda x: x[1], reverse=True)
+
+    print(f"Top {top_k} most costly misclassification pairs:\n")
+    print(f"{'Rank':<5} {'True → Pred':<30} {'Count':<8} {'Cost/err':<10} {'Total cost':<10}")
+    print("-" * 75)
+
+    for i, ((t, p), total_c) in enumerate(ranked[:top_k], start=1):
+        count = pair_counts[(t, p)]
+        cost_per_error = total_c / count
+        pair_name = f"{class_names[t]} → {class_names[p]}"
+        print(f"{i:<5} {pair_name:<30} {count:<8} {cost_per_error:<10.2f} {total_c:<10.2f}")
+
+    return ranked, pair_counts, pair_total_cost
+
+def get_misclassified_examples(model, loader, device, max_examples=10):
+    model.eval()
+    misclassified = []
+
+    with torch.no_grad():
+        for X, y in loader:
+            X = X.to(device)
+            y = y.to(device)
+
+            logits = model(X)
+            probs = torch.softmax(logits, dim=1)
+            preds = torch.argmax(probs, dim=1)
+
+            wrong_mask = preds != y
+            if wrong_mask.any():
+                X_wrong = X[wrong_mask].cpu()
+                y_wrong = y[wrong_mask].cpu()
+                preds_wrong = preds[wrong_mask].cpu()
+                conf_wrong = probs[wrong_mask].max(dim=1).values.cpu()
+
+                for i in range(X_wrong.size(0)):
+                    misclassified.append({
+                        "image": X_wrong[i],
+                        "true": int(y_wrong[i]),
+                        "pred": int(preds_wrong[i]),
+                        "conf": float(conf_wrong[i])
+                    })
+                    if len(misclassified) >= max_examples:
+                        return misclassified
+
+    return misclassified
+
+def plot_misclassified_examples(examples, categories):
+    if len(examples) == 0:
+        print("No misclassified examples found.")
+        return
+
+    fig, axes = plt.subplots(2, 5, figsize=(14, 6))
+    axes = axes.flatten()
+
+    for i, ax in enumerate(axes):
+        if i >= len(examples):
+            ax.axis("off")
+            continue
+
+        img = examples[i]["image"].squeeze(0)
+        true_label = examples[i]["true"]
+        pred_label = examples[i]["pred"]
+        conf = examples[i]["conf"]
+
+        ax.imshow(img, cmap="gray")
+        ax.axis("off")
+        ax.set_title(
+            f"True: {categories[true_label]}\n"
+            f"Pred: {categories[pred_label]} ({conf:.2f})",
+            fontsize=9
+        )
+
+    plt.tight_layout()
+    plt.show()
