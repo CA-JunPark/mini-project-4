@@ -4,6 +4,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn.functional as F
+from collections import defaultdict
 
 def generate_confusion_matrix(model, test_loader, criterion, device, classes):
     model.eval() # Set to evaluation mode
@@ -152,7 +153,7 @@ def plot_confidence_analysis(thresholds, accuracy_scores, acceptance_rates):
     plt.savefig('../results/confidence_threshold_analysis.png')
     plt.show()
 
-def build_cost_matrix(num_classes=10, default_wrong_cost=DEFAULT_WRONG_COST):
+def build_cost_matrix(num_classes, default_wrong_cost, cost_low, cost_med, cost_high):
     # Initialize a 10x10 matrix with 0
     cost_matrix = torch.zeros((num_classes, num_classes), dtype=torch.float32)
 
@@ -168,19 +169,19 @@ def build_cost_matrix(num_classes=10, default_wrong_cost=DEFAULT_WRONG_COST):
 
     # Business-specific costly errors
     # Bag → Sneaker (Low)
-    set_cost(true_label=8, pred_label=7, cost=COST_LOW)
+    set_cost(true_label=8, pred_label=7, cost=cost_low)
 
     # Shirt → T-shirt (High)
-    set_cost(true_label=6, pred_label=0, cost=COST_HIGH)
+    set_cost(true_label=6, pred_label=0, cost=cost_high)
 
     # Coat → Pullover (High)
-    set_cost(true_label=4, pred_label=2, cost=COST_HIGH)
+    set_cost(true_label=4, pred_label=2, cost=cost_high)
 
     # Sandal → Sneaker (Medium)
-    set_cost(true_label=5, pred_label=7, cost=COST_MED)
+    set_cost(true_label=5, pred_label=7, cost=cost_med)
 
     # Ankle boot → Sneaker (Medium)
-    set_cost(true_label=9, pred_label=7, cost=COST_MED)
+    set_cost(true_label=9, pred_label=7, cost=cost_med)
 
     return cost_matrix
 
