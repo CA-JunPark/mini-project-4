@@ -134,6 +134,8 @@ The improvement in cost-weighted accuracy indicates stronger performance when ac
 run .ipynb files with a created python environment.
 
 ## Team Member Contributions
+Group 1
+
 Bryan Rachmat: Data analysis
 
 Jun Park: Model training
